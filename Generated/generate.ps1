@@ -46,7 +46,7 @@ Get-Command -Module $param.Name
 
 # Cleanup Envirornment
 
-if( [System.IO.File]::Exists($tmp) ) {
+if( Test-Path $tmp ) {
     Remove-Item $tmp -Recurse
 }
 
