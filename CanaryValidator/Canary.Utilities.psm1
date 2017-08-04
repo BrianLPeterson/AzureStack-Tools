@@ -283,7 +283,11 @@ function Invoke-Usecase
         [string]$Description, 
         [parameter(Mandatory=$true, Position = 2)]
         [ValidateNotNullOrEmpty()]
-        [ScriptBlock]$UsecaseBlock    
+        [ScriptBlock]$UsecaseBlock,
+        [parameter(Mandatory=$false, Position = 3)]
+        [int]$RetryCount = 0, 
+        [parameter(Mandatory=$false, Position = 4)]
+        [int]$RetryDelayInSec = 10
     )
 
     if ($Global:listAvailableUsecases)
@@ -298,11 +302,13 @@ function Invoke-Usecase
 
             "`t" + $Name
         }
+
         if ($UsecaseBlock.ToString().Contains("Invoke-Usecase"))
         {
-            try {Invoke-Command -ScriptBlock $UsecaseBlock -ErrorAction SilentlyContinue}
+            try {Invoke-Command -ScriptBlock $UsecaseBlock -retryCount $RetryCount -RetryDelayInSec $RetryDelayInSec -ErrorAction SilentlyContinue}
             catch {}
         }
+
         return
     }
 
@@ -324,7 +330,52 @@ function Invoke-Usecase
 
     try
     {
-        $result = Invoke-Command -ScriptBlock $UsecaseBlock
+        $currentRetryCount = 0
+
+        do
+        {
+            $useCaseError = $null
+
+            Write-Host "$Name , $RetryCount"
+            try
+            {
+                $result = Invoke-Command -ScriptBlock $UsecaseBlock -ErrorVariable useCaseError -ErrorAction SilentlyContinue
+            }
+            catch{}
+
+            # Only log exceptions not the root cases not the parent
+            if($UsecaseBlock.ToString().Contains("Invoke-Usecase"))
+            {
+                $useCaseError = $null
+                break;
+            }
+
+            if($useCaseError)
+            {       
+                $currentRetryCount++
+
+                if($currentRetryCount -gt $retryCount)
+                {
+                    break
+                }
+                else
+                {
+                    Start-Sleep -Seconds $RetryDelayInSec
+                }
+            }
+        }
+        while($useCaseError)
+
+        if($useCaseError -and $currentRetryCount -gt 0)
+        {
+            throw "Test '$Name' failed and retried '$currentRetryCount' times. The last exception was: $useCaseError" 
+        }
+
+        if($useCaseError -and $currentRetryCount -eq 0)
+        {
+            throw $useCaseError
+        }
+
         if ($result -and (-not $UsecaseBlock.ToString().Contains("Invoke-Usecase")))
         {
             Log-Info ($result)
@@ -337,7 +388,7 @@ function Invoke-Usecase
         return $result | Out-Null
     }
     catch [System.Exception]
-    {        
+    {     
         Log-Exception ($_.Exception)
         Log-Info ("###### <FAULTING SCRIPTBLOCK> ######")
         Log-Info ("$UsecaseBlock")
